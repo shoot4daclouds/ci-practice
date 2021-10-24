@@ -1,4 +1,3 @@
 --- 
 - name: "kube-01"
 - name: "kube-02"
-- name: "kube-03"

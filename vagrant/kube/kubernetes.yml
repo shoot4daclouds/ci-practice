@@ -4,16 +4,16 @@
   tasks:
     - name: install kubernetes packages
       yum: 
-        name: "{{ item }}"
+        name:  ['kubelet', 'kubeadm','kubectl']
         state: present
-      with_item:
-        - kubelet
-        - kubeadm
-        - kubectl
 
     - name: configure fstab to disable swap
       shell: "sed -i '/ swap / s/^\\(.*\\)$/#\\1/g' /etc/fstab"
-      notify: swapoff
+      register: swapoff
+
+    - name: swapoff
+      shell: "swapoff -a"
+      when: swapoff.changed
 
     - name: configure sysctl
       modprobe:
@@ -22,7 +22,11 @@
       with_items:
         - overlay
         - br_netfilter
-      notify: sysctl system
+      register: sysctl
+
+    - name: sysctl system
+      shell: "sysctl --system"
+      when: sysctl.changed
 
     - name: add docker repo
       get_url:
@@ -31,15 +35,8 @@
 
     - name: install docker packages
       yum: 
-        name: "{{ item }}"
+        name: ['yum-utils', 'device-mapper-persistent-data', 'lvm2', 'docker-ce', 'docker-ce-cli','containerd.io']
         state: present
-      with_item:
-        - yum-utils 
-        - device-mapper-persistent-data 
-        - lvm2
-        - docker-ce 
-        - docker-ce-cli 
-        - containerd.io
 
     - name: start and enable docker
       service:
@@ -55,7 +52,7 @@
 
     - name: configure firewalld on master
       firewalld:
-        port: "{{ items }}"
+        port: "{{ item }}"
         permanent: yes
         state: enabled
         zone: public
@@ -73,7 +70,7 @@
 
     - name: configure firewalld on workers
       firewalld:
-        port: "{{ items }}"
+        port: "{{ item }}"
         permanent: yes
         state: enabled
         zone: public
@@ -92,7 +89,6 @@
       service:
         name: kubelet
         enabled: yes
-      when: "'master' in group_names"
 
     - name: pull container images
       shell: "kubeadm config images pull"
@@ -114,12 +110,11 @@
       register: init
       when: "'master' in group_names"
 
-    - name: initialize control-plane
+    - name: configure kubectl
       shell: | 
         mkdir -p $HOME/.kube
         cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
         chown $(id -u):$(id -g) $HOME/.kube/config
-      become_user: vagrant
       when: "'master' in group_names"
 
     - name: install network plugin
@@ -128,13 +123,13 @@
         - https://docs.projectcalico.org/manifests/tigera-operator.yaml
         - https://docs.projectcalico.org/manifests/custom-resources.yaml
       when: "'master' in group_names"
-    
+
     - name: add dns name to /etc/hosts - workers
       blockinfile:
         path: /etc/hosts
         block: |
-          "{{ hostvars[groups['all'][0]]['ansible_enp0s8']['ipv4']['address'] }} k8s-cluster.ci.local"
-        when: "'worker' in group_names"
+          {{ hostvars[groups['all'][0]]['ansible_enp0s8']['ipv4']['address'] }} k8s-cluster.ci.local
+      when: "'worker' in group_names"
 
     - name: output worker join command
       debug:
@@ -142,10 +137,6 @@
       when: "'master' in group_names"
       
   handlers:
-    - name: swapoff
-      shell: "swapoff -a"
-    - name: sysctl system
-      shell: "sysctl --system"
     - name: reload firewalld
       service: 
         name: firewalld
