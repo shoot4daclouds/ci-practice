@@ -1,0 +1,152 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: install kubernetes packages
+      yum: 
+        name: "{{ item }}"
+        state: present
+      with_item:
+        - kubelet
+        - kubeadm
+        - kubectl
+
+    - name: configure fstab to disable swap
+      shell: "sed -i '/ swap / s/^\\(.*\\)$/#\\1/g' /etc/fstab"
+      notify: swapoff
+
+    - name: configure sysctl
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      with_items:
+        - overlay
+        - br_netfilter
+      notify: sysctl system
+
+    - name: add docker repo
+      get_url:
+        url: https://download.docker.com/linux/centos/docker-ce.repo
+        dest: /etc/yum.repos.d/
+
+    - name: install docker packages
+      yum: 
+        name: "{{ item }}"
+        state: present
+      with_item:
+        - yum-utils 
+        - device-mapper-persistent-data 
+        - lvm2
+        - docker-ce 
+        - docker-ce-cli 
+        - containerd.io
+
+    - name: start and enable docker
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: ensure firewalld is started and enabled
+      service:
+        name: firewalld
+        state: started
+        enabled: yes
+
+    - name: configure firewalld on master
+      firewalld:
+        port: "{{ items }}"
+        permanent: yes
+        state: enabled
+        zone: public
+      with_items:
+        - 6443/tcp
+        - 2379-2380/tcp
+        - 10250-10251/tcp
+        - 5473/tcp
+        - 179/tcp
+        - 4789/udp
+        - 8285/udp
+        - 8472/udp
+      when: "'master' in group_names"
+      notify: reload firewalld
+
+    - name: configure firewalld on workers
+      firewalld:
+        port: "{{ items }}"
+        permanent: yes
+        state: enabled
+        zone: public
+      with_items:
+        - 30000-32767/tcp
+        - 10250/tcp
+        - 5473/tcp
+        - 179/tcp
+        - 4789/udp
+        - 8285/udp
+        - 8472/udp
+      when: "'worker' in group_names"
+      notify: reload firewalld
+
+    - name: ensure kubelet enabled
+      service:
+        name: kubelet
+        enabled: yes
+      when: "'master' in group_names"
+
+    - name: pull container images
+      shell: "kubeadm config images pull"
+      when: "'master' in group_names"
+
+    - name: add dns name to /etc/hosts - master
+      lineinfile:
+        path: /etc/hosts
+        regexp: "^{{ ansible_enp0s8.ipv4.address }} k8s-cluster.ci.local"
+        line: "{{ ansible_enp0s8.ipv4.address }} k8s-cluster.ci.local"
+      when: "'master' in group_names"
+
+    - name: initialize control-plane
+      shell: | 
+        kubeadm init \
+        --pod-network-cidr=192.168.0.0/16 \
+        --upload-certs \
+        --control-plane-endpoint=k8s-cluster.ci.local
+      register: init
+      when: "'master' in group_names"
+
+    - name: initialize control-plane
+      shell: | 
+        mkdir -p $HOME/.kube
+        cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+        chown $(id -u):$(id -g) $HOME/.kube/config
+      become_user: vagrant
+      when: "'master' in group_names"
+
+    - name: install network plugin
+      shell: "kubectl create -f {{ item }}"
+      with_items:
+        - https://docs.projectcalico.org/manifests/tigera-operator.yaml
+        - https://docs.projectcalico.org/manifests/custom-resources.yaml
+      when: "'master' in group_names"
+    
+    - name: add dns name to /etc/hosts - workers
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          "{{ hostvars[groups['all'][0]]['ansible_enp0s8']['ipv4']['address'] }} k8s-cluster.ci.local"
+        when: "'worker' in group_names"
+
+    - name: output worker join command
+      debug:
+        msg: "{{ init.stdout }}"
+      when: "'master' in group_names"
+      
+  handlers:
+    - name: swapoff
+      shell: "swapoff -a"
+    - name: sysctl system
+      shell: "sysctl --system"
+    - name: reload firewalld
+      service: 
+        name: firewalld
+        state: reloaded

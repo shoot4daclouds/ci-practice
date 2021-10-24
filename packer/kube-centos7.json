@@ -1,0 +1,65 @@
+{
+  "variables": {
+    "iso": "https://linuxsoft.cern.ch/centos/7/isos/x86_64/CentOS-7-x86_64-Minimal-2009.iso",
+    "iso_checksum": "07b94e6b1a0b0260b94c83d6bb76b26bf7a310dc78d7a9c7432809fb9bc6194a",
+    "iso_checksum_type": "sha256",
+    "memory": "8192",
+    "cpus": "2",
+    "disk_size": "20480"
+  },
+
+  "builders": [
+    {
+      "name": "kube-centos7",
+      "vm_name": "kube-centos7",
+      "boot_command": [
+        "<tab> text ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ks.cfg<enter><wait>"
+      ],
+      "disk_size": "{{ user `disk_size` }}",
+      "guest_os_type": "RedHat_64",
+      "http_directory": "http",
+      "iso_checksum": "{{ user `iso_checksum_type` }}:{{ user `iso_checksum` }}",
+      "iso_url": "{{ user `iso` }}",
+      "shutdown_command": "sudo -S shutdown -P now",
+      "ssh_password": "vagrant",
+      "ssh_port": 22,
+      "ssh_timeout": "800s",
+      "ssh_username": "vagrant",
+      "type": "virtualbox-iso",
+      "vboxmanage": [
+        ["modifyvm","{{.Name}}","--memory","{{ user `memory` }}"],
+        ["modifyvm","{{.Name}}","--cpus","{{ user `cpus` }}"],
+        ["modifyvm","{{.Name}}","--nic1","nat"],
+        ["modifyvm","{{.Name}}","--nic2","hostonly"],
+        ["modifyvm", "{{.Name}}","--hostonlyadapter2","VirtualBox Host-Only Ethernet Adapter"],
+        ["modifyvm","{{.Name}}","--usb","off"],
+        ["modifyvm","{{.Name}}","--audio","none"]
+      ]
+    }
+  ],
+
+  "provisioners": [
+    {
+      "type": "shell",
+      "execute_command": "sudo -S -E bash '{{.Path}}'",
+      "script": "shell-scripts/install-vagrant-ssh-keypair.sh"
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S -E bash '{{.Path}}'",
+      "script": "shell-scripts/install-guest-additions.sh"
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S -E bash '{{.Path}}'",
+      "script": "shell-scripts/kubernetes-prereqs.sh"
+    }
+  ],
+
+  "post-processors": [
+    {
+      "type": "vagrant",
+      "output": "{{.BuildName}}-{{.Provider}}.box"
+    }
+  ]
+}

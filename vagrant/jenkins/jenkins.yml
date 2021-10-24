@@ -1,0 +1,35 @@
+---
+- hosts: all
+  become: yes
+  tasks:
+    - name: import jenkins repo key
+      rpm_key:
+        state: present
+        key: https://pkg.jenkins.io/redhat-stable/jenkins.io.key
+    - name: install jenkins
+      yum: 
+        name: jenkins
+        state: present
+    - name: start and enable jenkins
+      service:
+        name: jenkins
+        state: started
+        enabled: yes
+    - name: ensure firewalld is started and enabled
+      service:
+        name: firewalld
+        state: started
+        enabled: yes
+    - name: configure firewalld
+      firewalld:
+        port: 8080/tcp
+        permanent: yes
+        state: enabled
+        zone: public
+      notify: reload firewalld
+
+  handlers:
+    - name: reload firewalld
+      service: 
+        name: firewalld
+        state: reloaded

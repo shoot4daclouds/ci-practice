@@ -1,8 +1,13 @@
 # Cache objects
 packer_cache/
+packer/packer_cache/
 
 # Crash log
 crash.log
+packer/crash.log
 
 # For built boxes
 *.box
+packer/*.box
+
+vagrant/*/.vagrant/

@@ -1,0 +1,39 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# Require YAML module
+require 'yaml'
+
+# Read YAML file with instance information
+instances = YAML.load_file(File.join(File.dirname(__FILE__), 'instances.yml'))
+
+Vagrant.configure("2") do |config|
+    config.vm.box = "../../packer/kube-centos7-virtualbox.box"
+
+    instances.each do |instance|
+
+        config.vm.define instance['name'] do |srv|
+
+            srv.vm.hostname = instance['name']
+            srv.vm.network "private_network", :type => 'dhcp', :adapter => 2
+
+            srv.vm.provider "virtualbox" do |v|
+                v.name = instance['name']
+                v.memory = 4096
+                v.cpus = 2
+            end
+
+        end
+
+    end
+
+    config.vm.provision "ansible_local" do |ansible|
+        ansible.groups = {
+            "master" => ["kube-01"],
+            "worker" => ["kube-02", "kube-03"]
+        }
+        ansible.playbook = "kubernetes.yml"
+    end
+
+  end
+  
