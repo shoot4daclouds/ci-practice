@@ -104,7 +104,7 @@
     - name: initialize control-plane
       shell: | 
         kubeadm init \
-        --pod-network-cidr=192.168.0.0/16 \
+        --pod-network-cidr=10.244.0.0/16 \
         --upload-certs \
         --control-plane-endpoint=k8s-cluster.ci.local
       register: init
@@ -117,11 +117,33 @@
         chown $(id -u):$(id -g) $HOME/.kube/config
       when: "'master' in group_names"
 
+    - name: pause for init
+      pause: 
+        minutes: 3
+      when: "'master' in group_names"
+
     - name: install network plugin
       shell: "kubectl create -f {{ item }}"
       with_items:
-        - https://docs.projectcalico.org/manifests/tigera-operator.yaml
-        - https://docs.projectcalico.org/manifests/custom-resources.yaml
+        - https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      when: "'master' in group_names"
+
+    - name: pause for init
+      pause: 
+        minutes: 1
+      when: "'master' in group_names"
+
+    - name: create jenkins service account
+      shell: "kubectl -n default create sa jenkins"
+      when: "'master' in group_names"
+
+    - name: create clusterrolebinding for jenkins
+      shell: "kubectl create clusterrolebinding jenkins --clusterrole cluster-admin --serviceaccount=default:jenkins"
+      when: "'master' in group_names"
+
+    - name: get sa jenkins secret 
+      shell: "kubectl get -n default sa/jenkins --template='{{ '{{' }}range .secrets{{ '}}' }}{{ '{{' }} .name {{ '}}' }} {{ '{{' }}end{{ '}}' }}' | xargs kubectl -n default get secret --template='{{ '{{' }} if .data.token {{ '}}' }}{{ '{{' }} .data.token {{ '}}' }}{{ '{{' }}end{{ '}}' }}' | head -n 1 | base64 -d -"
+      register: jenkins_token
       when: "'master' in group_names"
 
     - name: add dns name to /etc/hosts - workers
@@ -134,6 +156,11 @@
     - name: output worker join command
       debug:
         msg: "{{ init.stdout }}"
+      when: "'master' in group_names"
+    
+    - name: output jenkins token
+      debug:
+        msg: "{{ jenkins_token.stdout }}"
       when: "'master' in group_names"
       
   handlers:
