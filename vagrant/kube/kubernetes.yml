@@ -1,6 +1,8 @@
 ---
 - hosts: all
   become: yes
+  vars:
+    kube_mgmt_network: "172.28.128.0/24"
   tasks:
     - name: install kubernetes packages
       yum: 
@@ -153,6 +155,9 @@
           {{ hostvars[groups['all'][0]]['ansible_enp0s8']['ipv4']['address'] }} k8s-cluster.ci.local
       when: "'worker' in group_names"
 
+    - name: add route 
+      command: "ip route add {{ kube_mgmt_network }} dev enp0s8"
+
     - name: output worker join command
       debug:
         msg: "{{ init.stdout }}"
@@ -162,6 +167,16 @@
       debug:
         msg: "{{ jenkins_token.stdout }}"
       when: "'master' in group_names"
+    
+    - name: add flannel config - workers
+      blockinfile:
+        path: /run/flannel/subnet.env
+        block: |
+          FLANNEL_NETWORK=10.244.0.0/16
+          FLANNEL_SUBNET=10.244.0.1/24
+          FLANNEL_MTU=1450
+          FLANNEL_IPMASQ=true
+      when: "'worker' in group_names"
       
   handlers:
     - name: reload firewalld
